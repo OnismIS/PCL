@@ -1,0 +1,63 @@
+name: Sync upstream
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * 1"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-upstream-main
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork main
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Fetch upstream
+        shell: bash
+        run: |
+          git remote add upstream https://github.com/Meloong-Git/PCL.git
+          git fetch --prune upstream main
+
+      - name: Merge upstream main
+        shell: bash
+        run: git merge --no-edit upstream/main
+
+      - name: Reapply custom setting
+        shell: pwsh
+        run: |
+          $path = "Plain Craft Launcher 2/Modules/ModSecret.vb"
+          $content = [System.IO.File]::ReadAllText($path)
+          $pattern = '(?m)^\s*Public Const RestrictMcDownload As Boolean = (True|False)\s*$'
+          $matches = [System.Text.RegularExpressions.Regex]::Matches($content, $pattern)
+          if ($matches.Count -ne 1) {
+            throw "Expected exactly one RestrictMcDownload declaration, found $($matches.Count)."
+          }
+          $updated = [System.Text.RegularExpressions.Regex]::Replace(
+            $content,
+            $pattern,
+            'Public Const RestrictMcDownload As Boolean = False',
+            1
+          )
+          [System.IO.File]::WriteAllText($path, $updated, [System.Text.UTF8Encoding]::new($false))
+
+      - name: Commit and push if changed
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Already synchronized."
+            exit 0
+          fi
+          git commit -m "chore: sync upstream and keep unrestricted MC downloads"
+          git push origin HEAD:main
